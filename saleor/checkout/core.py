@@ -16,7 +16,7 @@ from ..cart.utils import get_or_empty_db_cart
 from ..core import analytics
 from ..discount.models import NotApplicable, Voucher
 from ..discount.utils import (
-    increase_voucher_usage, get_voucher_discount_for_checkout)
+    get_voucher_discount_for_checkout, increase_voucher_usage)
 from ..order.models import Order
 from ..shipping.models import ANY_COUNTRY, ShippingMethodCountry
 
