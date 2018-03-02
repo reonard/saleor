@@ -649,7 +649,7 @@ def collection(db):
 @pytest.fixture
 def page(db):
     data = {
-        'url': 'test-url',
+        'slug': 'test-url',
         'title': 'Test page',
         'content': 'test content'}
     page = Page.objects.create(**data)
