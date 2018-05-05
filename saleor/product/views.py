@@ -8,13 +8,15 @@ from django.urls import reverse
 
 from ..cart.utils import set_cart_cookie
 from ..core.utils import serialize_decimal
-from ..schema.product import product_json_ld
+from ..seo.schema.product import product_json_ld
 from .filters import ProductCategoryFilter, ProductCollectionFilter
 from .models import Category, Collection
 from .utils import (
-    get_availability, get_product_attributes_data, get_product_images,
-    get_product_list_context, get_variant_picker_data, handle_cart_form,
-    products_for_cart, products_with_details)
+    collections_visible_to_user, get_product_images, get_product_list_context,
+    handle_cart_form, products_for_cart, products_with_details)
+from .utils.attributes import get_product_attributes_data
+from .utils.availability import get_availability
+from .utils.variants_picker import get_variant_picker_data
 
 
 def product_details(request, slug, product_id, form=None):
@@ -126,7 +128,10 @@ def category_index(request, path, category_id):
 
 
 def collection_index(request, slug, pk):
-    collection = get_object_or_404(Collection, id=pk)
+    collections = collections_visible_to_user(request.user)
+    collection = get_object_or_404(collections, id=pk)
+    if collection.slug != slug:
+        return HttpResponsePermanentRedirect(collection.get_absolute_url())
     products = products_with_details(user=request.user).filter(
         collections__id=collection.id).order_by('name')
     product_filter = ProductCollectionFilter(

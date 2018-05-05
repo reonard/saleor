@@ -14,13 +14,12 @@ from ..account.utils import store_user_address
 from ..cart.models import Cart
 from ..cart.utils import get_or_empty_db_cart
 from ..core import analytics
-from ..core.utils import ZERO_TAXED_MONEY
 from ..discount.models import NotApplicable, Voucher
-from ..discount.utils import (
-    get_voucher_discount_for_checkout, increase_voucher_usage)
+from ..discount.utils import increase_voucher_usage
 from ..order.models import Order
 from ..order.utils import add_variant_to_order
 from ..shipping.models import ANY_COUNTRY, ShippingMethodCountry
+from .utils import get_voucher_discount_for_checkout
 
 STORAGE_SESSION_KEY = 'checkout_storage'
 
@@ -95,32 +94,6 @@ class Checkout:
     def is_shipping_required(self):
         """Return `True` if this checkout session needs shipping."""
         return self.cart.is_shipping_required()
-
-    @property
-    def deliveries(self):
-        """Return the cart split into shipment groups.
-
-        Generates tuples consisting of a partition, its shipping cost and its
-        total cost.
-
-        Each partition is a list of tuples containing the cart line, its unit
-        price and the line total.
-        """
-        for partition in self.cart.partition():
-            if self.shipping_method and partition.is_shipping_required():
-                shipping_cost = self.shipping_method.get_total_price()
-            else:
-                shipping_cost = ZERO_TAXED_MONEY
-            total_with_shipping = partition.get_total(
-                discounts=self.cart.discounts) + shipping_cost
-
-            partition = [
-                (item,
-                 item.get_price_per_item(discounts=self.cart.discounts),
-                 item.get_total(discounts=self.cart.discounts))
-                for item in partition]
-
-            yield partition, shipping_cost, total_with_shipping
 
     @property
     def shipping_address(self):
@@ -395,20 +368,15 @@ class Checkout:
 
     def get_subtotal(self):
         """Calculate order total without shipping and discount."""
-        cost_iterator = (
-            total - shipping_cost
-            for shipment, shipping_cost, total in self.deliveries)
-        total = sum(cost_iterator, ZERO_TAXED_MONEY)
-        return total
+        return self.cart.get_total()
 
     def get_total(self):
         """Calculate order total with shipping and discount amount."""
-        cost_iterator = (
-            total
-            for shipment, shipping_cost, total in self.deliveries)
-        total = sum(cost_iterator, ZERO_TAXED_MONEY)
+        total = self.cart.get_total()
+        if self.shipping_method and self.is_shipping_required:
+            total += self.shipping_method.get_total_price()
         if self.discount:
-            return total - self.discount
+            total -= self.discount
         return total
 
 

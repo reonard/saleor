@@ -4,10 +4,13 @@ from operator import itemgetter
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils.safestring import mark_safe
 from django.utils.translation import pgettext_lazy
 from django_countries import countries
 from django_prices.models import MoneyField
 from prices import TaxedMoney, TaxedMoneyRange
+
+from ..core.utils import format_money
 
 ANY_COUNTRY = ''
 ANY_COUNTRY_DISPLAY = pgettext_lazy('Country choice', 'Rest of World')
@@ -78,7 +81,8 @@ class ShippingMethodCountry(models.Model):
         choices=COUNTRY_CODE_CHOICES, max_length=2, blank=True,
         default=ANY_COUNTRY)
     price = MoneyField(
-        currency=settings.DEFAULT_CURRENCY, max_digits=12, decimal_places=2)
+        currency=settings.DEFAULT_CURRENCY, max_digits=12,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES)
     shipping_method = models.ForeignKey(
         ShippingMethod, related_name='price_per_country',
         on_delete=models.CASCADE)
@@ -95,3 +99,9 @@ class ShippingMethodCountry(models.Model):
 
     def get_total_price(self):
         return TaxedMoney(net=self.price, gross=self.price)
+
+    @property
+    def ajax_label(self):
+        price_html = format_money(self.price)
+        label = mark_safe('%s %s' % (self.shipping_method, price_html))
+        return label

@@ -2,10 +2,10 @@ import itertools
 import os
 import random
 import unicodedata
-from collections import defaultdict
 
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission
+from django.contrib.sites.models import Site
 from django.core.files import File
 from django.template.defaultfilters import slugify
 from faker import Factory
@@ -15,25 +15,32 @@ from prices import Money, TaxedMoney
 
 from ...account.models import Address, User
 from ...account.utils import store_user_address
+from ...core.utils.text import strip_html_and_truncate
 from ...discount import DiscountValueType, VoucherType
 from ...discount.models import Sale, Voucher
+from ...menu.models import Menu
 from ...order.models import Fulfillment, Order, Payment
 from ...order.utils import update_order_status
+from ...page.models import Page
 from ...product.models import (
     AttributeChoiceValue, Category, Collection, Product, ProductAttribute,
-    ProductImage, ProductType, ProductVariant, Stock, StockLocation)
+    ProductImage, ProductType, ProductVariant)
+from ...product.thumbnails import create_product_thumbnails
+from ...product.utils.attributes import get_name_from_attributes
 from ...shipping.models import ANY_COUNTRY, ShippingMethod
 
 fake = Factory.create()
-STOCK_LOCATION = 'default'
-
-DEFAULT_CATEGORY = 'Default'
 
 DELIVERY_REGIONS = [ANY_COUNTRY, 'US', 'PL', 'DE', 'GB']
+PRODUCTS_LIST_DIR = 'products-list/'
+
+GROCERIES_CATEGORY = {'name': 'Groceries', 'image_name': 'groceries.jpg'}
 
 DEFAULT_SCHEMA = {
     'T-Shirt': {
-        'category': 'Apparel',
+        'category': {
+            'name': 'Apparel',
+            'image_name': 'apparel.jpg'},
         'product_attributes': {
             'Color': ['Blue', 'White'],
             'Collar': ['Round', 'V-Neck', 'Polo'],
@@ -43,14 +50,19 @@ DEFAULT_SCHEMA = {
         'images_dir': 't-shirts/',
         'is_shipping_required': True},
     'Mugs': {
-        'category': 'Accessories',
+        'category': {
+            'name': 'Accessories',
+            'image_name': 'accessories.jpg'},
         'product_attributes': {
             'Brand': ['Saleor']},
         'variant_attributes': {},
         'images_dir': 'mugs/',
         'is_shipping_required': True},
     'Coffee': {
-        'category': 'Groceries',
+        'category': {
+            'name': 'Coffees',
+            'image_name': 'coffees.jpg',
+            'parent': GROCERIES_CATEGORY},
         'product_attributes': {
             'Coffee Genre': ['Arabica', 'Robusta'],
             'Brand': ['Saleor']},
@@ -60,7 +72,10 @@ DEFAULT_SCHEMA = {
         'images_dir': 'coffee/',
         'is_shipping_required': True},
     'Candy': {
-        'category': 'Groceries',
+        'category': {
+            'name': 'Candies',
+            'image_name': 'candies.jpg',
+            'parent': GROCERIES_CATEGORY},
         'product_attributes': {
             'Flavor': ['Sour', 'Sweet'],
             'Brand': ['Saleor']},
@@ -69,7 +84,9 @@ DEFAULT_SCHEMA = {
         'images_dir': 'candy/',
         'is_shipping_required': True},
     'E-books': {
-        'category': 'Books',
+        'category': {
+            'name': 'Books',
+            'image_name': 'books.jpg'},
         'product_attributes': {
             'Author': ['John Doe', 'Milionare Pirate'],
             'Publisher': ['Mirumee Press', 'Saleor Publishing'],
@@ -78,7 +95,9 @@ DEFAULT_SCHEMA = {
         'images_dir': 'books/',
         'is_shipping_required': False},
     'Books': {
-        'category': 'Books',
+        'category': {
+            'name': 'Books',
+            'image_name': 'books.jpg'},
         'product_attributes': {
             'Author': ['John Doe', 'Milionare Pirate'],
             'Publisher': ['Mirumee Press', 'Saleor Publishing'],
@@ -87,6 +106,13 @@ DEFAULT_SCHEMA = {
             'Cover': ['Soft', 'Hard']},
         'images_dir': 'books/',
         'is_shipping_required': True}}
+COLLECTIONS_SCHEMA = [
+    {
+        'name': 'Summer collection',
+        'image_name': 'summer.jpg'},
+    {
+        'name': 'Winter sale',
+        'image_name': 'sale.jpg'}]
 
 
 def create_attributes_and_values(attribute_data):
@@ -133,27 +159,6 @@ def set_product_attributes(product, product_type):
     product.save(update_fields=['attributes'])
 
 
-def set_variant_attributes(variant, product_type):
-    attr_dict = {}
-    existing_variants = variant.product.variants.values_list(
-        'attributes', flat=True)
-    existing_variant_attributes = defaultdict(list)
-    for variant_attrs in existing_variants:
-        for attr_id, value_id in variant_attrs.items():
-            existing_variant_attributes[attr_id].append(value_id)
-
-    for product_attribute in product_type.variant_attributes.all():
-        available_values = product_attribute.values.exclude(
-            pk__in=[int(pk) for pk
-                    in existing_variant_attributes[str(product_attribute.pk)]])
-        if not available_values:
-            return
-        value = random.choice(available_values)
-        attr_dict[str(product_attribute.pk)] = str(value.pk)
-    variant.attributes = attr_dict
-    variant.save(update_fields=['attributes'])
-
-
 def get_variant_combinations(product):
     # Returns all possible variant combinations
     # For example: product type has two variant attributes: Size, Color
@@ -184,8 +189,7 @@ def get_price_override(schema, combinations_num, current_price):
 def create_products_by_type(
         product_type, schema, placeholder_dir, how_many=10, create_images=True,
         stdout=None):
-    category_name = schema.get('category') or DEFAULT_CATEGORY
-    category = get_or_create_category(category_name)
+    category = get_or_create_category(schema['category'], placeholder_dir)
 
     for dummy in range(how_many):
         product = create_product(
@@ -249,61 +253,68 @@ def get_email(first_name, last_name):
         _first.lower().decode('utf-8'), _last.lower().decode('utf-8'))
 
 
-def get_or_create_category(name, **kwargs):
+def get_or_create_category(category_schema, placeholder_dir):
+    if 'parent' in category_schema:
+        parent_id = get_or_create_category(
+            category_schema['parent'], placeholder_dir).id
+    else:
+        parent_id = None
+    category_name = category_schema['name']
+    image_name = category_schema['image_name']
+    image_dir = get_product_list_images_dir(placeholder_dir)
     defaults = {
-        'description': fake.text()}
-    defaults.update(kwargs)
-    defaults['slug'] = fake.slug(name)
-
-    return Category.objects.get_or_create(name=name, defaults=defaults)[0]
+        'description': fake.text(),
+        'slug': fake.slug(category_name),
+        'background_image': get_image(image_dir, image_name)}
+    return Category.objects.get_or_create(
+        name=category_name, parent_id=parent_id, defaults=defaults)[0]
 
 
 def get_or_create_product_type(name, **kwargs):
     return ProductType.objects.get_or_create(name=name, defaults=kwargs)[0]
 
 
-def get_or_create_collection(name, **kwargs):
-    kwargs['slug'] = fake.slug(name)
-    return Collection.objects.get_or_create(name=name, defaults=kwargs)[0]
+def get_or_create_collection(name, placeholder_dir, image_name):
+    background_image = get_image(placeholder_dir, image_name)
+    defaults = {
+        'slug': fake.slug(name),
+        'background_image': background_image}
+    return Collection.objects.get_or_create(name=name, defaults=defaults)[0]
 
 
 def create_product(**kwargs):
+    description = fake.paragraphs(5)
     defaults = {
         'name': fake.company(),
         'price': fake.money(),
-        'description': '\n\n'.join(fake.paragraphs(5))}
+        'description': '\n\n'.join(description),
+        'seo_description': strip_html_and_truncate(description[0], 300)}
     defaults.update(kwargs)
     return Product.objects.create(**defaults)
 
 
-def create_stock(variant, **kwargs):
-    default_location = StockLocation.objects.get_or_create(
-        name=STOCK_LOCATION)[0]
-    defaults = {
-        'variant': variant,
-        'location': default_location,
-        'quantity': fake.random_int(1, 50)}
-    defaults.update(kwargs)
-    return Stock.objects.create(**defaults)
-
-
 def create_variant(product, **kwargs):
     defaults = {
-        'product': product}
+        'product': product,
+        'quantity': fake.random_int(1, 50),
+        'cost_price': fake.money(),
+        'quantity_allocated': fake.random_int(1, 50)}
     defaults.update(kwargs)
-    variant = ProductVariant.objects.create(**defaults)
-    create_stock(variant)
+    variant = ProductVariant(**defaults)
+    if variant.attributes:
+        variant.name = get_name_from_attributes(variant)
+    variant.save()
     return variant
 
 
 def create_product_image(product, placeholder_dir):
     placeholder_root = os.path.join(settings.PROJECT_ROOT, placeholder_dir)
-    img_path = '%s/%s' % (placeholder_dir,
-                          random.choice(os.listdir(placeholder_root)))
-    image = ProductImage(
-        product=product,
-        image=File(open(img_path, 'rb'))).save()
-    return image
+    image_name = random.choice(os.listdir(placeholder_root))
+    image = get_image(placeholder_dir, image_name)
+    product_image = ProductImage(product=product, image=image)
+    product_image.save()
+    create_product_thumbnails.delay(product_image.pk)
+    return product_image
 
 
 def create_attribute(**kwargs):
@@ -388,18 +399,15 @@ def create_order_line(order):
     product = Product.objects.all().order_by('?')[0]
     variant = product.variants.all()[0]
     quantity = random.randrange(1, 5)
-    stock = variant.stock.first()
-    stock.quantity += quantity
-    stock.quantity_allocated += quantity
-    stock.save()
+    variant.quantity += quantity
+    variant.quantity_allocated += quantity
+    variant.save()
     return order.lines.create(
-        product=product,
         product_name=product.name,
         product_sku=variant.sku,
         is_shipping_required=product.product_type.is_shipping_required,
         quantity=quantity,
-        stock=stock,
-        stock_location=stock.location.name,
+        variant=variant,
         unit_price=TaxedMoney(net=product.price, gross=product.price))
 
 
@@ -421,7 +429,6 @@ def create_fulfillments(order):
 
 
 def create_fake_order():
-
     user = random.choice([None, User.objects.filter(
         is_superuser=False).order_by('?').first()])
     if user:
@@ -530,7 +537,7 @@ def create_fake_group():
 
 def create_groups():
     group = create_fake_group()
-    return 'Group: %s' % (group.name)
+    return 'Group: %s' % (group.name,)
 
 
 def set_featured_products(how_many=8):
@@ -545,14 +552,100 @@ def add_address_to_admin(email):
     store_user_address(user, address, True, True)
 
 
-def create_fake_collection():
-    collection = get_or_create_collection(name='%s collection' % fake.word())
+def create_fake_collection(placeholder_dir, collection_data):
+    image_dir = get_product_list_images_dir(placeholder_dir)
+    collection = get_or_create_collection(
+        name=collection_data['name'], placeholder_dir=image_dir,
+        image_name=collection_data['image_name'])
     products = Product.objects.order_by('?')[:4]
     collection.products.add(*products)
     return collection
 
 
-def create_collections(how_many=2):
-    for dummy in range(how_many):
-        collection = create_fake_collection()
+def create_collections_by_schema(placeholder_dir, schema=COLLECTIONS_SCHEMA):
+    for collection_data in COLLECTIONS_SCHEMA:
+        collection = create_fake_collection(placeholder_dir, collection_data)
         yield 'Collection: %s' % (collection,)
+
+
+def create_page():
+    content = """
+    <h2 align="center">AN OPENSOURCE STOREFRONT PLATFORM FOR PERFECTIONISTS</h2>
+    <h3 align="center">WRITTEN IN PYTHON, BEST SERVED AS A BESPOKE, HIGH-PERFORMANCE E-COMMERCE SOLUTION</h3>
+    <p><br></p>
+    <p><img src="http://getsaleor.com/images/main-pic.svg"></p>
+    <p style="text-align: center;">
+        <a href="https://github.com/mirumee/saleor/">Get Saleor</a> today!
+    </p>
+    """
+    page_data = {'content': content, 'title': 'About', 'is_visible': True}
+    page, dummy = Page.objects.get_or_create(slug='about', **page_data)
+    yield 'Page %s created' % page.slug
+
+
+def generate_menu_items(menu: Menu, category: Category, parent_menu_item):
+    menu_item, created = menu.items.get_or_create(
+        name=category.name, category=category, parent=parent_menu_item)
+
+    if created:
+        yield 'Created menu item for category %s' % category
+
+    for child in category.get_children():
+        for msg in generate_menu_items(menu, child, menu_item):
+            yield '\t%s' % msg
+
+
+def generate_menu_tree(menu):
+    categories = Category.tree.get_queryset()
+    for category in categories:
+        if not category.parent_id:
+            for msg in generate_menu_items(menu, category, None):
+                yield msg
+
+
+def create_menus():
+    # Create navbar menu with category links
+    top_menu, _ = Menu.objects.get_or_create(
+        name=settings.DEFAULT_MENUS['top_menu_name'])
+    if not top_menu.items.exists():
+        yield 'Created navbar menu'
+        for msg in generate_menu_tree(top_menu):
+            yield msg
+
+    # Create footer menu with collections and pages
+    bottom_menu, _ = Menu.objects.get_or_create(
+        name=settings.DEFAULT_MENUS['bottom_menu_name'])
+    if not bottom_menu.items.exists():
+        collection = Collection.objects.order_by('?')[0]
+        item, _ = bottom_menu.items.get_or_create(
+            name='Collections',
+            collection=collection)
+
+        for collection in Collection.objects.filter(
+                background_image__isnull=False):
+            bottom_menu.items.get_or_create(
+                name=collection.name,
+                collection=collection,
+                parent=item)
+
+        page = Page.objects.order_by('?')[0]
+        bottom_menu.items.get_or_create(
+            name=page.title,
+            page=page)
+        yield 'Created footer menu'
+    site = Site.objects.get_current()
+    site_settings = site.settings
+    site_settings.top_menu = top_menu
+    site_settings.bottom_menu = bottom_menu
+    site_settings.save()
+
+
+def get_product_list_images_dir(placeholder_dir):
+    product_list_images_dir = os.path.join(
+        placeholder_dir, PRODUCTS_LIST_DIR)
+    return product_list_images_dir
+
+
+def get_image(image_dir, image_name):
+    img_path = os.path.join(image_dir, image_name)
+    return File(open(img_path, 'rb'))

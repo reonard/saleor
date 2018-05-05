@@ -7,7 +7,6 @@
 {% load status %}
 {% load staticfiles %}
 {% load dashboard %}
-{% load discount_amount_for from prices %}
 
 {% block title %}
   {% trans "Fulfill" context "Dashboard order fulfillment" %} {{ order }} - {% trans "Orders" context "Dashboard orders list" %} - {{ block.super }}
@@ -77,8 +76,8 @@
               {% for line in unfulfilled_lines %}
                 <tr>
                   <td>
-                    {% if line.product %}
-                      <a href="{% url 'dashboard:product-detail' pk=line.product.pk %}">{{ line.product_name }}</a>
+                    {% if line.variant %}
+                      <a href="{% url 'dashboard:variant-details' product_pk=line.variant.product.pk variant_pk=line.variant.pk %}">{{ line.product_name }}</a>
                     {% else %}
                       {{ line.product_name }}
                     {% endif %}
@@ -126,7 +125,9 @@
         </div>
         <div class="data-table-content">
           {{ form.tracking_number|materializecss }}
-          {{ form.send_mail|materializecss }}
+          {% if form.send_mail %}
+            {{ form.send_mail|materializecss }}
+          {% endif %}
         </div>
         <div class="data-table-action right-align">
           <a href="{% url 'dashboard:order-details' order.pk %}" class="btn-flat waves-effect">
