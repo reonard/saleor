@@ -1,11 +1,13 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
 {% load materializecss %}
-{% load staticfiles %}
+{% load static %}
 {% load utils %}
 
 {% block title %}{% trans "Menu items" context "Menu item list page title" %} -
   {{ block.super }}{% endblock %}
+
+{% block body_class %}body-menus{% endblock %}
 
 {% block menu_menus_class %}active{% endblock %}
 
@@ -80,7 +82,6 @@
             </div>
           </div>
         </div>
-        {% if perms.product.edit_menu %}
         <div class="card-action">
           <a class="btn-flat waves-effect" href="{% url "dashboard:menu-item-edit" menu_pk=menu.pk item_pk=menu_item.pk %}">
             {% trans "Edit menu item" context "Menu item detail view action" %}
@@ -89,7 +90,6 @@
             {% trans "Remove menu item" context "Menu item detail view action" %}
           </a>
         </div>
-        {% endif %}
       </div>
       {% if menu_item.level < 2 %}
         {% include 'dashboard/includes/_menu_items.html' with menu=menu menu_items=menu_items root_item=menu_item %}

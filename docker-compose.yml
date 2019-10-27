@@ -1,44 +1,59 @@
 version: '2'
+
 services:
-  db:
-    image: postgres
-    environment:
-      - POSTGRES_USER=saleor
-      - POSTGRES_PASSWORD=saleor
-    ports:
-      - '127.0.0.1:5432:5432'
-  redis:
-    image: redis
-    ports:
-      - '127.0.0.1:6379:6379'
-  celery:
+  web:
     build:
       context: .
-      dockerfile: Dockerfile
-    env_file: common.env
-    command: celery -A saleor worker --app=saleor.celeryconf:app --loglevel=info
-    volumes:
-      - .:/app:Z
-    links:
-      - redis
-    depends_on:
-      - redis
-  search:
-    image: elasticsearch:5.4.3
-    mem_limit: 512m
-    environment:
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - '127.0.0.1:9200:9200'
-  web:
-    build: .
-    command: python manage.py runserver 0.0.0.0:8000
+      dockerfile: ./Dockerfile
+      args:
+        STATIC_URL: '/static/'
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
     env_file: common.env
     depends_on:
       - db
       - redis
-      - search
-    ports:
-      - '8000:8000'
+
+  db:
+    image: library/postgres:11.1-alpine
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
     volumes:
-      - .:/app:Z
+      - saleor-db:/var/lib/postgresql
+    environment:
+      - POSTGRES_USER=saleor
+      - POSTGRES_PASSWORD=saleor
+
+  redis:
+    image: library/redis:5.0-alpine
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    volumes:
+      - saleor-redis:/data
+
+  celery:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        STATIC_URL: '/static/'
+    command: celery -A saleor worker --app=saleor.celeryconf:app --loglevel=info
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    env_file: common.env
+    depends_on:
+      - redis
+
+volumes:
+  saleor-db:
+    driver: local
+  saleor-redis:
+    driver: local
+
+networks:
+  saleor-backend-tier:
+    driver: bridge

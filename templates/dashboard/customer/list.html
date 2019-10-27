@@ -1,8 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
-{% load prices_i18n %}
 {% load materializecss %}
-{% load staticfiles %}
+{% load static %}
 {% load utils %}
 
 {% block title %}
@@ -14,13 +13,11 @@
 {% block menu_customers_class %}active{% endblock %}
 
 {% block header_extra %}
-  {% if perms.account.edit_staff %}
-    <div class="btn-fab-fixed">
-      <a href="{% url 'dashboard:customer-create' %}" class="btn-fab-default waves-effect waves-light" title="{% trans "Add customer" context "Customer list add button text" %}" >
-        <svg data-src="{% static "dashboard/images/add.svg" %}" />
-      </a>
-    </div>
-  {% endif %}
+  <div class="btn-fab-fixed">
+    <a href="{% url 'dashboard:customer-create' %}" class="btn-fab-default waves-effect waves-light" title="{% trans "Add customer" context "Customer list add button text" %}" >
+      <svg data-src="{% static "dashboard/images/add.svg" %}" />
+    </a>
+  </div>
 {% endblock %}
 
 {% block breadcrumbs %}
@@ -55,8 +52,8 @@
                   <tr data-action-go="{% url "dashboard:customer-details" pk=customer.pk %}">
                     {% with customer.default_billing_address as default_address %}
                       <td>
-                        {% if default_address %}
-                          {{ default_address.first_name }} {{ default_address.last_name }}
+                        {% if customer.get_full_name != customer.email %}
+                          {{ customer.get_full_name }}
                         {% else %}
                           -
                         {% endif %}

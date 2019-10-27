@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 
 {% load i18n %}
-{% load staticfiles %}
+{% load static %}
 
 {% block title %}
   {% trans "Images" %} - {{ block.super }}
@@ -52,16 +52,16 @@
         <div class="dz-message"></div>
         {% csrf_token %}
         <div class="row">
-          <ul class="product-gallery" id="product-gallery" data-post-url="{% url 'dashboard:product-images-reorder' product_pk=product.pk %}">
+          <ul class="product-gallery sortable-items" data-post-url="{% url 'dashboard:product-images-reorder' product_pk=product.pk %}" data-post-name="ordered_images">
             {% if images %}
               {% for image in images %}
-                <li class="col s12 m6 l4 product-gallery-item"
+                <li class="col s12 m6 l4 sortable-item"
                     data-id="{{ image.pk }}">
                   <div class="card">
                     <div class="card-image product-gallery-item-image">
                       <img class="responsive-img"
-                           src="{{ image.image.crop.255x255 }}"
-                           srcset="{{ image.image.crop.255x255 }} 1x, {{ image.image.crop.510x510 }} 2x"
+                           src="{{ image.image.thumbnail.255x255 }}"
+                           srcset="{{ image.image.thumbnail.255x255 }} 1x, {{ image.image.thumbnail.510x510 }} 2x"
                            alt="">
                     </div>
                     <div class="card-content">

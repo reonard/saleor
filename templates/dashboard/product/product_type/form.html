@@ -1,8 +1,7 @@
 {% extends "dashboard/base.html" %}
-{% load prices_i18n %}
 {% load i18n %}
 {% load materializecss %}
-{% load staticfiles %}
+{% load static %}
 
 {% block title %}
   {% if product_type.pk %}
@@ -52,7 +51,7 @@
       <svg data-src="{% static "dashboard/images/more-vert.svg" %}" height="24" width="24" />
     </a>
     <ul id="context-menu" class="dropdown-content">
-      {% if perms.product.edit_properties %}
+      {% if perms.product.manage_products %}
       <li>
         <a href="#base-modal" data-href="{% url 'dashboard:product-type-delete' pk=product_type.pk %}" class="modal-trigger-custom">
           {% trans "Remove product type" context "Product type action" %}
@@ -91,8 +90,28 @@
                 </div>
               </div>
             </div>
+              <div class="row">
+                <div class="col s12">
+                  <span class="card-title">{% trans "Taxes" %}</span>
+                </div>
+                <div class="col s12 m8">
+                  {% if form.tax_rate.field.choices %}
+                    {{ form.tax_rate|materializecss }}
+                  {% else %}
+                    {% trans "Tax settings are disabled. Make sure you have enabled a VAT provider and fetched the rates if required by the plugin." context "Note message in product type form when no rates were found" %}
+                  {% endif %}
+                </div>
+              </div>
+            <div class="row">
+              <div class="col s12">
+                <span class="card-title">{% trans "Shipping" %}</span>
+              </div>
+              <div class="col s12 m8">
+                {{ form.weight|materializecss }}
+              </div>
+            </div>
           </div>
-          {% if perms.product.edit_properties %}
+          {% if perms.product.manage_products %}
           <div class="card-action right-align">
             <a href="{% url 'dashboard:product-type-list' %}" class="btn-flat waves-effect">
               {% trans "Cancel" context "Dashboard cancel action" %}

@@ -1,9 +1,10 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
-{% load prices_i18n %}
+{% load price from taxed_prices %}
+{% load prices %}
 {% load status %}
 {% load utils %}
-{% load staticfiles %}
+{% load static %}
 
 {% block title %}{% trans "Orders" context "Dashboard orders list" %} - {{ block.super }}{% endblock %}
 
@@ -12,17 +13,15 @@
 {% block menu_orders_class %}active{% endblock %}
 
 {% block header_extra %}
-  {% if perms.order.edit_order %}
-    <div class="btn-fab-fixed">
-      <form method="POST" action="{% url "dashboard:order-create" %}">
-      {% csrf_token %}
-        <label class="btn-fab-default waves-effect waves-light svg-submit-btn" title="{% trans "Add order" context "Order list add button text" %}">
-          <input type="submit" />
-          <svg data-src="{% static "dashboard/images/add.svg" %}" />
-        </label>
-      </form>
-    </div>
-  {% endif %}
+  <div class="btn-fab-fixed">
+    <form method="POST" action="{% url "dashboard:order-create" %}">
+    {% csrf_token %}
+      <label class="btn-fab-default waves-effect waves-light svg-submit-btn" title="{% trans "Add order" context "Order list add button text" %}">
+        <input type="submit" />
+        <svg data-src="{% static "dashboard/images/add.svg" %}" />
+      </label>
+    </form>
+  </div>
 {% endblock %}
 
 {% block breadcrumbs %}
@@ -42,16 +41,17 @@
                 <tr>
                   {% sorting_header 'pk' '#' %}
 
-                  <th></th>
+                  {% trans "Placed on" context "Orders table header" as label %}
+                  {% sorting_header 'created' label %}
 
                   {% trans "Customer" context "Orders table header" as label %}
                   {% sorting_header 'email' label %}
 
-                  {% trans "Placed on" context "Orders table header" as label %}
-                  {% sorting_header 'created' label %}
-
                   {% trans "Payment status" context "Orders table header" as label %}
                   {% sorting_header 'payment_status' label %}
+
+                  {% trans "Order status" context "Orders table header" as label %}
+                  {% sorting_header 'order_status' label %}
 
                   {% trans "Total" context "Orders table header" as label %}
                   {% sorting_header 'total' label %}
@@ -64,20 +64,20 @@
                       #{{ order.id }}
                     </td>
                     <td>
-                      {% render_order_status order.status order.get_status_display %}
+                      {{ order.created }}
                     </td>
                     {% trans "Guest" context "Anonymous user account value" as guest %}
                     <td>
                       {{ order.user|default:guest }}
                     </td>
                     <td>
-                      {{ order.created }}
+                      {% render_status order.get_payment_status order.get_payment_status_display %}
                     </td>
                     <td>
-                      {% render_status order.get_last_payment_status order.get_last_payment_status_display %}
+                      {% render_order_status order.status order.get_status_display %}
                     </td>
                     <td class="right-align">
-                      {{ order.total.gross|amount:'html' }}
+                      {% price order.total.gross %}
                     </td>
                   </tr>
                 {% endfor %}

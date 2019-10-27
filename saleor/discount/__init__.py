@@ -1,37 +1,40 @@
+from dataclasses import dataclass
+from typing import Any, List
+
 from django.conf import settings
 from django.utils.translation import pgettext_lazy
 
 
 class DiscountValueType:
-    FIXED = 'fixed'
-    PERCENTAGE = 'percentage'
+    FIXED = "fixed"
+    PERCENTAGE = "percentage"
 
     CHOICES = [
-        (FIXED, pgettext_lazy(
-            'Discount type', settings.DEFAULT_CURRENCY)),
-        (PERCENTAGE, pgettext_lazy('Discount type', '%'))]
+        (FIXED, pgettext_lazy("Discount type", settings.DEFAULT_CURRENCY)),
+        (PERCENTAGE, pgettext_lazy("Discount type", "%")),
+    ]
 
 
 class VoucherType:
-    PRODUCT = 'product'
-    CATEGORY = 'category'
-    SHIPPING = 'shipping'
-    VALUE = 'value'
+    SHIPPING = "shipping"
+    ENTIRE_ORDER = "entire_order"
+    SPECIFIC_PRODUCT = "specific_product"
 
     CHOICES = [
-        (VALUE, pgettext_lazy('Voucher: discount for', 'All purchases')),
-        (PRODUCT, pgettext_lazy('Voucher: discount for', 'One product')),
-        (CATEGORY, pgettext_lazy(
-            'Voucher: discount for', 'A category of products')),
-        (SHIPPING, pgettext_lazy('Voucher: discount for', 'Shipping'))]
+        (ENTIRE_ORDER, pgettext_lazy("Voucher: discount for", "Entire order")),
+        (SHIPPING, pgettext_lazy("Voucher: discount for", "Shipping")),
+        (
+            SPECIFIC_PRODUCT,
+            pgettext_lazy(
+                "Voucher: discount for", "Specific products, collections and categories"
+            ),
+        ),
+    ]
 
 
-class VoucherApplyToProduct:
-    ONE_PRODUCT = 'one'
-    ALL_PRODUCTS = 'all'
-
-    CHOICES = [
-        (ONE_PRODUCT, pgettext_lazy(
-            'Voucher application', 'Apply to a single item')),
-        (ALL_PRODUCTS, pgettext_lazy(
-            'Voucher application', 'Apply to all matching products'))]
+@dataclass
+class DiscountInfo:
+    sale: Any
+    product_ids: List[int]
+    category_ids: List[int]
+    collection_ids: List[int]

@@ -1,9 +1,9 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
-{% load prices_i18n %}
 {% load materializecss %}
-{% load staticfiles %}
-{% load product_first_image from product_images %}
+{% load price from taxed_prices %}
+{% load get_product_image_thumbnail from product_images %}
+{% load static %}
 {% load utils %}
 
 {% block title %}
@@ -16,19 +16,17 @@
 
 {% block header_extra %}
   {% if product_types %}
-    {% if perms.product.edit_product %}
-      <div class="btn-fab-fixed">
-        {% if product_types|length > 1 %}
-        <a data-href="{% url "dashboard:product-add-select-type" %}" class="btn-fab-default waves-effect waves-light modal-trigger-custom" href="#base-modal" title="{% trans "Add product" context "Product list add button text" %}">
-            <svg data-src="{% static "dashboard/images/add.svg" %}" />
-          </a>
-        {% else %}
-          <a class="btn-fab-default waves-effect waves-light modal-trigger" href="{% url 'dashboard:product-add' product_types.0.pk %}" title="{% trans "Add product" context "Product list add button text" %}">
-            <svg data-src="{% static "dashboard/images/add.svg" %}" />
-          </a>
-        {% endif %}
-      </div>
-    {% endif %}
+    <div class="btn-fab-fixed">
+      {% if product_types|length > 1 %}
+      <a data-href="{% url "dashboard:product-add-select-type" %}" class="btn-fab-default waves-effect waves-light modal-trigger-custom" href="#base-modal" title="{% trans "Add product" context "Product list add button text" %}">
+          <svg data-src="{% static "dashboard/images/add.svg" %}" />
+        </a>
+      {% else %}
+        <a class="btn-fab-default waves-effect waves-light modal-trigger" href="{% url 'dashboard:product-add' product_types.0.pk %}" title="{% trans "Add product" context "Product list add button text" %}">
+          <svg data-src="{% static "dashboard/images/add.svg" %}" />
+        </a>
+      {% endif %}
+    </div>
   {% endif %}
 {% endblock %}
 
@@ -64,7 +62,7 @@
               {% sorting_header 'name' label is_wide=True %}
 
               {% trans "Price" context "Products list table header" as label %}
-              {% sorting_header 'price' label is_wide=True %}
+              {% sorting_header 'price_amount' label is_wide=True %}
             </tr>
           </thead>
           <tbody>
@@ -75,15 +73,15 @@
                 <label for="id_products_{{ product.pk }}"></label>
               </td>
               <td class="avatar">
-                <img src="{% product_first_image product size="60x60" method="crop" %}"
-                    srcset="{% product_first_image product size="60x60" method="crop" %} 1x, {% product_first_image product size="120x120" method="crop" %} 2x"
+                <img src="{% get_product_image_thumbnail product.get_first_image size=60 method="thumbnail" %}"
+                    srcset="{% get_product_image_thumbnail product.get_first_image size=60 method="thumbnail" %} 1x, {% get_product_image_thumbnail product.get_first_image size=120 method="thumbnail" %} 2x"
                     alt="">
               </td>
               <td>
                 {{ product.name }}
               </td>
               <td>
-                {{ product.price|amount:'html' }}
+                {% price product.price %}
               </td>
             </tr>
           {% endfor %}

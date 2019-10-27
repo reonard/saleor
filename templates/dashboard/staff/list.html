@@ -1,8 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
-{% load prices_i18n %}
 {% load materializecss %}
-{% load staticfiles %}
+{% load static %}
 {% load utils %}
 
 {% block title %}
@@ -14,15 +13,13 @@
 {% block menu_staff_class %}active{% endblock %}
 
 {% block header_extra %}
-  {% if perms.account.edit_staff %}
-    <div class="btn-fab-fixed">
-      <a class="btn-fab-default waves-effect waves-light"
-        title="{% trans "Add staff member" context "Staff members list add button text" %}"
-        href="{% url 'dashboard:staff-create' %}">
-        <svg data-src="{% static "dashboard/images/add.svg" %}" />
-      </a>
-    </div>
-  {% endif %}
+  <div class="btn-fab-fixed">
+    <a class="btn-fab-default waves-effect waves-light"
+      title="{% trans "Add staff member" context "Staff members list add button text" %}"
+      href="{% url 'dashboard:staff-create' %}">
+      <svg data-src="{% static "dashboard/images/add.svg" %}" />
+    </a>
+  </div>
 {% endblock %}
 
 {% block breadcrumbs %}
@@ -57,8 +54,8 @@
                   <tr data-action-go="{% url "dashboard:staff-details" pk=user.pk %}">
                     {% with user.default_billing_address as default_address %}
                       <td>
-                        {% if default_address %}
-                          {{ default_address.first_name }} {{ default_address.last_name }}
+                        {% if user.get_full_name != user.email %}
+                          {{ user.get_full_name }}
                         {% else %}
                           -
                         {% endif %}

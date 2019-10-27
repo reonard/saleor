@@ -1,6 +1,7 @@
 engines:
   eslint:
     enabled: true
+    channel: eslint-4
   isort:
     enabled: true
     channel: beta
@@ -8,6 +9,16 @@ engines:
     enabled: true
   pylint:
     enabled: true
+    channel: beta
+    plugins:
+    - celery
+    - django
+    checks:
+      import-error:
+        enabled: false
+  tslint:
+    enabled: true
+    config: tslint.json
   duplication:
     enabled: true
     config:
@@ -21,7 +32,6 @@ exclude_patterns:
 - "**/migrations/"
 - "node_modules/"
 - "tests/"
-- "**/test_*"
 ratings:
   paths:
   - saleor/**

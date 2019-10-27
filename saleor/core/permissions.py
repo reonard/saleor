@@ -1,37 +1,34 @@
 from django.contrib.auth.models import Permission
 
 MODELS_PERMISSIONS = [
-    'menu.view_menu',
-    'menu.edit_menu',
-    'order.view_order',
-    'order.edit_order',
-    'page.view_page',
-    'page.edit_page',
-    'product.view_category',
-    'product.edit_category',
-    'product.view_product',
-    'product.edit_product',
-    'product.view_properties',
-    'product.edit_properties',
-    'sale.view_sale',
-    'sale.edit_sale',
-    'shipping.view_shipping',
-    'shipping.edit_shipping',
-    'site.edit_settings',
-    'site.view_settings',
-    'user.view_user',
-    'user.edit_user',
-    'user.view_group',
-    'user.edit_group',
-    'user.view_staff',
-    'user.edit_staff',
-    'user.impersonate_user',
-    'voucher.view_voucher',
-    'voucher.edit_voucher',
+    "account.manage_users",
+    "account.manage_staff",
+    "account.manage_service_accounts",
+    "account.impersonate_users",
+    "discount.manage_discounts",
+    "giftcard.manage_gift_card",
+    "extensions.manage_plugins",
+    "menu.manage_menus",
+    "order.manage_orders",
+    "page.manage_pages",
+    "product.manage_products",
+    "shipping.manage_shipping",
+    "site.manage_settings",
+    "site.manage_translations",
+    "webhook.manage_webhooks",
 ]
 
 
-def get_permissions():
-    codenames = [permission.split('.')[1] for permission in MODELS_PERMISSIONS]
-    return Permission.objects.filter(codename__in=codenames)\
-        .prefetch_related('content_type')
+def split_permission_codename(permissions):
+    return [permission.split(".")[1] for permission in permissions]
+
+
+def get_permissions(permissions=None):
+    if permissions is None:
+        permissions = MODELS_PERMISSIONS
+    codenames = split_permission_codename(permissions)
+    return (
+        Permission.objects.filter(codename__in=codenames)
+        .prefetch_related("content_type")
+        .order_by("codename")
+    )

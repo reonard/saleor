@@ -1,33 +1,53 @@
-from django import forms
-from django_filters.constants import STRICTNESS
-from graphene_django.filter.filterset import FilterSet
+import django_filters
+from django.core.exceptions import ValidationError
+from django.utils.translation import ugettext_lazy as _
+from django_filters.fields import MultipleChoiceField
 
 
-class DistinctFilterSet(FilterSet):
-    # workaround for https://github.com/graphql-python/graphene-django/pull/290
-    @property
-    def qs(self):
-        if not hasattr(self, '_qs'):
-            if not self.is_bound:
-                self._qs = self.queryset.all().distinct()
-                return self._qs
+class DefaultMultipleChoiceField(MultipleChoiceField):
+    default_error_messages = {"invalid_list": _("Enter a list of values.")}
 
-            if not self.form.is_valid():
-                if self.strict == STRICTNESS.RAISE_VALIDATION_ERROR:
-                    raise forms.ValidationError(self.form.errors)
-                elif self.strict == STRICTNESS.RETURN_NO_RESULTS:
-                    self._qs = self.queryset.none()
-                    return self._qs
-                # else STRICTNESS.IGNORE...  ignoring
+    def to_python(self, value):
+        if not value:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        return value
 
-            # start with all the results and filter from there
-            qs = self.queryset.all().distinct()
-            for name, filter_ in self.filters.items():
-                value = self.form.cleaned_data.get(name)
+    def validate(self, value):
+        """Validate that the input is a list or tuple."""
+        if self.required and not value:
+            raise ValidationError(self.error_messages["required"], code="required")
+        if not isinstance(value, (list, tuple)):
+            raise ValidationError(
+                self.error_messages["invalid_list"], code="invalid_list"
+            )
+        return True
 
-                if value is not None:  # valid & clean data
-                    qs = filter_.filter(qs, value).distinct()
 
-            self._qs = qs
+class EnumFilter(django_filters.CharFilter):
+    """Filter class for Graphene enum object.
 
-        return self._qs
+    enum_class needs to be passed explicitly as well as the method.
+    """
+
+    def __init__(self, input_class, *args, **kwargs):
+        assert kwargs.get(
+            "method"
+        ), "Providing exact filter method is required for EnumFilter"
+        self.input_class = input_class
+        super().__init__(*args, **kwargs)
+
+
+class ListObjectTypeFilter(django_filters.MultipleChoiceFilter):
+    field_class = DefaultMultipleChoiceField
+
+    def __init__(self, input_class, *args, **kwargs):
+        self.input_class = input_class
+        super().__init__(*args, **kwargs)
+
+
+class ObjectTypeFilter(django_filters.Filter):
+    def __init__(self, input_class, *args, **kwargs):
+        self.input_class = input_class
+        super().__init__(*args, **kwargs)

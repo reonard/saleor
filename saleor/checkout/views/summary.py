@@ -1,90 +1,64 @@
 from django.contrib import messages
+from django.db import transaction
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
-from django.utils.translation import pgettext, pgettext_lazy
+from django.utils.translation import pgettext
 
-from ...account.forms import get_address_form
 from ...account.models import Address
+from ...core import analytics
 from ...core.exceptions import InsufficientStock
-from ...order.emails import send_order_confirmation
-from ..forms import (
-    AnonymousUserBillingForm, BillingAddressesForm,
-    BillingWithoutShippingAddressForm, NoteForm)
+from ...core.taxes import TaxError
+from ...discount.models import NotApplicable
+from ..forms import CheckoutNoteForm
+from ..utils import (
+    create_order,
+    get_checkout_context,
+    prepare_order_data,
+    update_billing_address_in_anonymous_checkout,
+    update_billing_address_in_checkout,
+    update_billing_address_in_checkout_with_shipping,
+)
 
 
-def create_order(checkout):
-    """Finalize a checkout session and create an order.
-
-    This is a helper function.
-
-    `checkout` is a `saleor.checkout.core.Checkout` instance.
-    """
-    order = checkout.create_order()
-    if not order:
-        return None, redirect('checkout:summary')
-    checkout.clear_storage()
-    checkout.cart.clear()
-    user = None if checkout.user.is_anonymous else checkout.user
-    msg = pgettext_lazy('Order status history entry', 'Order was placed')
-    order.history.create(user=user, content=msg)
-    send_order_confirmation.delay(order.pk)
-    return order, redirect('order:payment', token=order.token)
-
-
-def handle_order_placement(request, checkout):
+@transaction.atomic()
+def _handle_order_placement(request, checkout):
     """Try to create an order and redirect the user as necessary.
 
-    This is a helper function.
+    This function creates an order from checkout and performs post-create actions
+    such as removing the checkout instance, sending order notification email
+    and creating order history events.
     """
     try:
-        order, redirect_url = create_order(checkout)
+        # Run checks an prepare the data for order creation
+        order_data = prepare_order_data(
+            checkout=checkout,
+            tracking_code=analytics.get_client_id(request),
+            discounts=request.discounts,
+        )
     except InsufficientStock:
-        return redirect('cart:index')
-    if not order:
-        msg = pgettext('Checkout warning', 'Please review your checkout.')
-        messages.warning(request, msg)
-    return redirect_url
+        return redirect("checkout:index")
+    except NotApplicable:
+        messages.warning(
+            request, pgettext("Checkout warning", "Please review your checkout.")
+        )
+        return redirect("checkout:summary")
+    except TaxError as tax_error:
+        messages.warning(
+            request,
+            pgettext(
+                "Checkout warning", "Unable to calculate taxes - %s" % str(tax_error)
+            ),
+        )
+        return redirect("checkout:summary")
 
+    # Push the order data into the database
+    order = create_order(checkout=checkout, order_data=order_data, user=request.user)
 
-def get_billing_forms_with_shipping(
-        data, addresses, billing_address, shipping_address):
-    """Get billing form based on a the current billing and shipping data."""
-    if billing_address == shipping_address:
-        address_form, preview = get_address_form(
-            data, country_code=shipping_address.country.code,
-            autocomplete_type='billing',
-            initial={'country': shipping_address.country.code},
-            instance=None)
-        addresses_form = BillingAddressesForm(
-            data, additional_addresses=addresses, initial={
-                'address': BillingAddressesForm.SHIPPING_ADDRESS})
-    elif billing_address.id is None:
-        address_form, preview = get_address_form(
-            data, country_code=billing_address.country.code,
-            autocomplete_type='billing',
-            initial={'country': billing_address.country.code},
-            instance=billing_address)
-        addresses_form = BillingAddressesForm(
-            data, additional_addresses=addresses, initial={
-                'address': BillingAddressesForm.NEW_ADDRESS})
-    else:
-        address_form, preview = get_address_form(
-            data, country_code=billing_address.country.code,
-            autocomplete_type='billing',
-            initial={'country': billing_address.country})
-        addresses_form = BillingAddressesForm(
-            data, additional_addresses=addresses, initial={
-                'address': billing_address.id})
-    if addresses_form.is_valid() and not preview:
-        address_id = addresses_form.cleaned_data['address']
-        if address_id == BillingAddressesForm.SHIPPING_ADDRESS:
-            return address_form, addresses_form, shipping_address
-        elif address_id != BillingAddressesForm.NEW_ADDRESS:
-            address = addresses.get(id=address_id)
-            return address_form, addresses_form, address
-        elif address_form.is_valid():
-            return address_form, addresses_form, address_form.instance
-    return address_form, addresses_form, None
+    # remove checkout after order is created
+    checkout.delete()
+
+    # Redirect the user to the payment page
+    return redirect("order:payment", token=order.token)
 
 
 def summary_with_shipping_view(request, checkout):
@@ -92,27 +66,31 @@ def summary_with_shipping_view(request, checkout):
 
     Will create an order if all data is valid.
     """
-    note_form = NoteForm(request.POST or None, checkout=checkout)
+    note_form = CheckoutNoteForm(request.POST or None, instance=checkout)
     if note_form.is_valid():
-        note_form.set_checkout_note()
+        note_form.save()
 
-    if request.user.is_authenticated:
-        additional_addresses = request.user.addresses.all()
-    else:
-        additional_addresses = Address.objects.none()
-    address_form, addresses_form, address = get_billing_forms_with_shipping(
-        request.POST or None, additional_addresses,
-        checkout.billing_address or Address(country=request.country),
-        checkout.shipping_address)
-    if address is not None:
-        checkout.billing_address = address
-        return handle_order_placement(request, checkout)
-    return TemplateResponse(
-        request, 'checkout/summary.html', context={
-            'addresses_form': addresses_form, 'address_form': address_form,
-            'checkout': checkout,
-            'additional_addresses': additional_addresses,
-            'note_form': note_form})
+    user_addresses = (
+        checkout.user.addresses.all() if checkout.user else Address.objects.none()
+    )
+
+    addresses_form, address_form, updated = update_billing_address_in_checkout_with_shipping(  # noqa
+        checkout, user_addresses, request.POST or None, request.country
+    )
+
+    if updated:
+        return _handle_order_placement(request, checkout)
+
+    ctx = get_checkout_context(checkout, request.discounts)
+    ctx.update(
+        {
+            "additional_addresses": user_addresses,
+            "address_form": address_form,
+            "addresses_form": addresses_form,
+            "note_form": note_form,
+        }
+    )
+    return TemplateResponse(request, "checkout/summary.html", ctx)
 
 
 def anonymous_summary_without_shipping(request, checkout):
@@ -120,29 +98,22 @@ def anonymous_summary_without_shipping(request, checkout):
 
     Will create an order if all data is valid.
     """
-    note_form = NoteForm(request.POST or None, checkout=checkout)
+    note_form = CheckoutNoteForm(request.POST or None, instance=checkout)
     if note_form.is_valid():
-        note_form.set_checkout_note()
-    user_form = AnonymousUserBillingForm(
-        request.POST or None, initial={'email': checkout.email})
-    billing_address = checkout.billing_address
-    if billing_address:
-        address_form, preview = get_address_form(
-            request.POST or None, country_code=billing_address.country.code,
-            autocomplete_type='billing', instance=billing_address)
-    else:
-        address_form, preview = get_address_form(
-            request.POST or None, country_code=request.country.code,
-            autocomplete_type='billing', initial={'country': request.country})
-    if all([user_form.is_valid(), address_form.is_valid()]) and not preview:
-        checkout.email = user_form.cleaned_data['email']
-        checkout.billing_address = address_form.instance
-        return handle_order_placement(request, checkout)
-    return TemplateResponse(
-        request, 'checkout/summary_without_shipping.html', context={
-            'user_form': user_form, 'address_form': address_form,
-            'checkout': checkout,
-            'note_form': note_form})
+        note_form.save()
+
+    user_form, address_form, updated = update_billing_address_in_anonymous_checkout(
+        checkout, request.POST or None, request.country
+    )
+
+    if updated:
+        return _handle_order_placement(request, checkout)
+
+    ctx = get_checkout_context(checkout, request.discounts)
+    ctx.update(
+        {"address_form": address_form, "note_form": note_form, "user_form": user_form}
+    )
+    return TemplateResponse(request, "checkout/summary_without_shipping.html", ctx)
 
 
 def summary_without_shipping(request, checkout):
@@ -150,46 +121,26 @@ def summary_without_shipping(request, checkout):
 
     Will create an order if all data is valid.
     """
-    note_form = NoteForm(request.POST or None, checkout=checkout)
+    note_form = CheckoutNoteForm(request.POST or None, instance=checkout)
     if note_form.is_valid():
-        note_form.set_checkout_note()
+        note_form.save()
 
-    billing_address = checkout.billing_address
-    user_addresses = request.user.addresses.all()
-    if billing_address and billing_address.id:
-        address_form, preview = get_address_form(
-            request.POST or None, autocomplete_type='billing',
-            initial={'country': request.country},
-            country_code=billing_address.country.code,
-            instance=billing_address)
-        addresses_form = BillingWithoutShippingAddressForm(
-            request.POST or None, additional_addresses=user_addresses,
-            initial={'address': billing_address.id})
-    elif billing_address:
-        address_form, preview = get_address_form(
-            request.POST or None, autocomplete_type='billing',
-            instance=billing_address,
-            country_code=billing_address.country.code)
-        addresses_form = BillingWithoutShippingAddressForm(
-            request.POST or None, additional_addresses=user_addresses)
-    else:
-        address_form, preview = get_address_form(
-            request.POST or None, autocomplete_type='billing',
-            initial={'country': request.country},
-            country_code=request.country.code)
-        addresses_form = BillingWithoutShippingAddressForm(
-            request.POST or None, additional_addresses=user_addresses)
+    user_addresses = checkout.user.addresses.all()
 
-    if addresses_form.is_valid():
-        address_id = addresses_form.cleaned_data['address']
-        if address_id != BillingWithoutShippingAddressForm.NEW_ADDRESS:
-            checkout.billing_address = user_addresses.get(id=address_id)
-            return handle_order_placement(request, checkout)
-        elif address_form.is_valid() and not preview:
-            checkout.billing_address = address_form.instance
-            return handle_order_placement(request, checkout)
-    return TemplateResponse(
-        request, 'checkout/summary_without_shipping.html', context={
-            'addresses_form': addresses_form, 'address_form': address_form,
-            'checkout': checkout, 'additional_addresses': user_addresses,
-            'note_form': note_form})
+    addresses_form, address_form, updated = update_billing_address_in_checkout(
+        checkout, user_addresses, request.POST or None, request.country
+    )
+
+    if updated:
+        return _handle_order_placement(request, checkout)
+
+    ctx = get_checkout_context(checkout, request.discounts)
+    ctx.update(
+        {
+            "additional_addresses": user_addresses,
+            "address_form": address_form,
+            "addresses_form": addresses_form,
+            "note_form": note_form,
+        }
+    )
+    return TemplateResponse(request, "checkout/summary_without_shipping.html", ctx)
